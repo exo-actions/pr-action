@@ -35,6 +35,10 @@ inputs:
   M2_SETTINGS_FILE_URL:
     description: Maven Settings.xml file download URL
     required: false
+  GIT_CHECKOUT_SHOW_PROGRESS:
+    description: Show git checkout progress
+    default: "false"
+    required: false
 
 runs:
   using: "composite"
@@ -63,6 +67,7 @@ runs:
       with:
         fetch-depth: 0
         token: ${{ env.gh_token }}
+        show-progress: ${{ inputs.GIT_CHECKOUT_SHOW_PROGRESS }}
     # Check Partial Build Eligibility
     - name: Analyse Pull Request Changes
       shell: bash
