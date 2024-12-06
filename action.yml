@@ -26,10 +26,10 @@ inputs:
     default: "false"
   NEXUS_USERNAME:
     description: Maven Nexus server user name (readonly user is highly recommended)
-    required: true
+    required: false
   NEXUS_PASSWORD:
     description: Maven Nexus server user password
-    required: true
+    required: false
   GH_TOKEN:
     description: Github user token for private repositories (defaults to github.token)
     required: false
