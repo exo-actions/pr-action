@@ -43,15 +43,6 @@ inputs:
 runs:
   using: "composite"
   steps:
-    # Use github.token for Public Repositories. Otherwise, a GH_TOKEN token is needed for private ones.
-    - name: Check Github Token
-      shell: bash
-      env: 
-        gh_token: ${{ inputs.GH_TOKEN }}
-      run: |
-        if [ -z "${gh_token}" ]; then 
-          echo "gh_token=${{ github.token }}" >> $GITHUB_ENV
-        fi
     # Hack: Maximize Disk space for big & legacy projects (May become unsupported in future Azure runner releases)
     - name: Maximize build space
       uses: easimon/maximize-build-space@v10
@@ -66,14 +57,14 @@ runs:
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
-        token: ${{ env.gh_token }}
+        token: ${{ inputs.GH_TOKEN || github.token }}
         show-progress: ${{ inputs.GIT_CHECKOUT_SHOW_PROGRESS }}
     # Check Partial Build Eligibility
     - name: Analyse Pull Request Changes
       shell: bash
       id: analyse-pr
       env:
-        GH_TOKEN: ${{ env.gh_token }}
+        GH_TOKEN: ${{ inputs.GH_TOKEN || github.token }}
         is_fork: ${{ github.event.pull_request.head.repo.fork }}
         base_branch_name: ${{ github.event.pull_request.base.ref }}
         clone_url: ${{ github.event.pull_request.head.repo.clone_url }}
@@ -167,7 +158,7 @@ runs:
       shell: bash
       env:
         MAVEN_SUBMODULES: ${{ steps.analyse-pr.outputs.partialmodules }}
-        GH_TOKEN: ${{ env.gh_token }}
+        GH_TOKEN: ${{ inputs.GH_TOKEN || github.token }}
         clone_url: ${{ github.event.pull_request.head.repo.clone_url }}
         pull_number: ${{ github.event.pull_request.number }}
       run: |
