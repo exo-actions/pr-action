@@ -1,5 +1,6 @@
 name: PR BUILD
 description: 'This action is used to build maven projects with partial builds support'
+author: 'eXo Platform'
 inputs:
   maven_version:
     description: Maven version
