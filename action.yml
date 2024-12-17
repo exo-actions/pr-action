@@ -8,6 +8,7 @@ inputs:
     required: false
   maven_profiles:
     description: Maven Profiles
+    default: "default"
     required: false
   extra_maven_opts:
     description: Extra Maven OPTS
