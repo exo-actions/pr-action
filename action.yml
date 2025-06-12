@@ -4,7 +4,7 @@ author: 'eXo Platform'
 inputs:
   maven_version:
     description: Maven version
-    default: "3.9.9"
+    default: "3.9.10"
     required: false
   maven_profiles:
     description: Maven Profiles
