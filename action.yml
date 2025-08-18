@@ -56,7 +56,7 @@ runs:
         remove-dotnet: "true"
     # Checkout Repository (Shallow clone is disabled due to partial builds Checks)
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
       with:
         fetch-depth: 0
         token: ${{ inputs.GH_TOKEN || github.token }}
