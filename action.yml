@@ -169,6 +169,11 @@ runs:
         else 
           gh pr edit ${pull_number} --remove-label partialCIBuild --repo ${clone_url} || true
         fi
+    - name: Normalize Maven local repository metadata
+      shell: bash
+      run: |
+        find ~/.m2/repository -name "_remote.repositories" -delete
+        find ~/.m2/repository -name "*.lastUpdated" -delete
     # Perform Maven Build
     - name: Build module
       shell: bash
