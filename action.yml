@@ -153,7 +153,7 @@ runs:
       shell: bash
       if: inputs.M2_SETTINGS_FILE_URL != ''
       run: |
-        mkdir -p ~/.m2
+        mkdir -p ~/.m2/repository
         wget -q "${{ inputs.M2_SETTINGS_FILE_URL }}" -O ~/.m2/settings.xml
     # Add/Remove partialCIBuild Github Label according to partial build eligibility
     - name: Submit Partial PR label
