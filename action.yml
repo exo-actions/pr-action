@@ -242,7 +242,7 @@ runs:
     
     # Setup Maven
     - name: Set up Maven ${{ inputs.maven_version }}
-      uses: stCarolas/setup-maven@v5
+      uses: stCarolas/setup-maven@v5.1
       with:
         maven-version: ${{ inputs.maven_version }}
     
