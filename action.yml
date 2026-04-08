@@ -287,8 +287,10 @@ runs:
     - name: Clean Maven metadata
       shell: bash
       run: |
-        find ~/.m2/repository -name "_remote.repositories" -type f -delete
-        find ~/.m2/repository -name "*.lastUpdated" -type f -delete
+        if [ -d ~/.m2/repository ]; then
+          find ~/.m2/repository -name "_remote.repositories" -type f -delete
+          find ~/.m2/repository -name "*.lastUpdated" -type f -delete
+        fi
     
     # Set Build Info
     - name: Set build information
