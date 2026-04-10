@@ -219,8 +219,7 @@ runs:
         done <<< "${CHANGED_FILES}"
         
         # Remove duplicates and format
-        MODULES_TO_BUILD=$(echo "${MODULES_TO_BUILD}" | tr ' ' '\n' | sort -u | tr '\n' ',' | sed 's/,$//')
-        
+        MODULES_TO_BUILD=$(echo "${MODULES_TO_BUILD}" | tr ', ' '\n' | grep -v '^$' | awk '!seen[$0]++' | paste -sd ',' -)
         if [ -z "${MODULES_TO_BUILD}" ]; then 
           echo "ℹ️ No modules to build - full build"
           echo "::endgroup::"
