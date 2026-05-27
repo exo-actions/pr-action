@@ -19,7 +19,7 @@ jobs:
       - name: PR BUILD
         uses: exo-actions/pr-action@v1
         with:
-          maven_version: "3.9.15"
+          maven_version: "3.9.16"
           jdk_major_version: "21"
           jdk_distribution: "zulu"
 ```
@@ -29,7 +29,7 @@ jobs:
 
 | Name                 | Description                                                                                          | Default value                    |
 |----------------------|------------------------------------------------------------------------------------------------------|----------------------------------|
-| maven_version        | Maven version                                                                                        | `3.9.15` (latest stable)          |
+| maven_version        | Maven version                                                                                        | `3.9.16` (latest stable)          |
 | maven_profiles       | Maven build profiles                                                                                 | `` (empty)                       |
 | extra_maven_opts     | Maven extra options                                                                                  | `` (empty)                       |
 | jdk_major_version    | JDK major version (`8`, `11`, `17`, `21`, `23`, ...)                                                 | `17`                             |
