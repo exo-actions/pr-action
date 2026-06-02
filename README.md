@@ -37,3 +37,20 @@ jobs:
 | maximize_build_space | Maximize Build Space for Bigger Projects Unit tests based on files and blocks                        | `false`                          |
 | NEXUS_USERNAME       | *Secret* Maven repository username for private repositories                                          | `` (empty - optional secret)     |
 | NEXUS_PASSWORD       | *Secret* Maven repository user password (token) for private repositories                             | `` (empty - optional secret)     |
+| maven_args           | Additional Maven arguments                                                                           | `` (empty)                       |
+| extra_maven_opts     | Additional Maven JVM options (MAVEN_OPTS)                                                            | `` (empty)                       |
+| skip_tests           | Skip running tests                                                                                   | `false`                          |
+| fail_fast            | Fail the build at the first error                                                                    | `true`                           |
+| enable_partial_build | Enable partial build for PRs (only builds affected frontend modules)                                 | `true`                           |
+| partial_build_modules| Comma-separated list of modules for manual partial build                                             | `` (empty)                       |
+| cache_key_suffix     | Suffix for cache key customization                                                                   | `` (empty)                       |
+
+## PR Labels
+
+The following labels can be applied to a PR to control build behavior:
+
+| Label            | Effect                                                               |
+|------------------|----------------------------------------------------------------------|
+| `pr/debug`       | Runs Maven with `-X` (debug mode, full stack traces)                 |
+| `pr/progress`    | Shows Maven download progress (hidden by default)                    |
+| `pr/nocolors`    | Disables ANSI color output from Maven                                |

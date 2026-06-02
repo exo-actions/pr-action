@@ -294,7 +294,7 @@ runs:
         
         DEBUG=false
         PROGRESS=false
-        BATCH=false
+        NOCOLORS=false
         for label in $LABELS; do
           if [ "$label" = "pr/debug" ]; then
             echo "🐛 Debug mode enabled by label"
@@ -304,14 +304,14 @@ runs:
             echo "📊 Download progress enabled by label"
             PROGRESS=true
           fi
-          if [ "$label" = "pr/batch" ]; then
-            echo "⚙️ Batch mode enabled by label"
-            BATCH=true
+          if [ "$label" = "pr/nocolors" ]; then
+            echo "🎨 Colors disabled by label"
+            NOCOLORS=true
           fi
         done
         echo "debug_logging=${DEBUG}" >> $GITHUB_OUTPUT
         echo "show_progress=${PROGRESS}" >> $GITHUB_OUTPUT
-        echo "batch_mode=${BATCH}" >> $GITHUB_OUTPUT
+        echo "nocolors=${NOCOLORS}" >> $GITHUB_OUTPUT
     
     # Clean Maven Metadata
     - name: Clean Maven metadata
@@ -353,7 +353,7 @@ runs:
         MAVEN_ARGS: ${{ inputs.maven_args }}
         DEBUG_LOGGING: ${{ steps.label-check.outputs.debug_logging }}
         SHOW_PROGRESS: ${{ steps.label-check.outputs.show_progress }}
-        BATCH_MODE: ${{ steps.label-check.outputs.batch_mode }}
+        NOCOLORS: ${{ steps.label-check.outputs.nocolors }}
       run: |
         # Build module arguments
         MODULE_ARGS=""
@@ -387,19 +387,18 @@ runs:
           TRANSFER_ARGS=""
         fi
         
-        BATCH_ARGS=""
-        if [ "${BATCH_MODE}" = "true" ]; then
-          BATCH_ARGS="-B"
+        COLOR_ARGS="-Dstyle.color=always"
+        if [ "${NOCOLORS}" = "true" ]; then
+          COLOR_ARGS="-Dstyle.color=never"
         fi
         
         # Execute Maven
-        mvn clean verify \
+        mvn -B clean verify \
           -P${MAVEN_PROFILES} \
-          -Dstyle.color=always \
+          ${COLOR_ARGS} \
           -Dmaven.artifact.threads=20 \
           -Dgpg.skip=true \
           -U \
-          ${BATCH_ARGS} \
           ${MAVEN_DEBUG} \
           ${TRANSFER_ARGS} \
           ${FAIL_ARGS} \
