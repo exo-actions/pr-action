@@ -106,7 +106,7 @@ runs:
       with:
         fetch-depth: 0
         token: ${{ inputs.GH_TOKEN || github.token }}
-        show-progress: ${{ inputs.GIT_CHECKOUT_SHOW_PROGRESS }}
+        show-progress: ${{ inputs.GIT_CHECKOUT_SHOW_PROGRESS == 'true' }}
     
     # Analyze PR for Partial Build
     - name: Analyze pull request changes
