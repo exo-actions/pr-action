@@ -279,23 +279,33 @@ runs:
           gh pr edit ${PR_NUMBER} --remove-label partialCIBuild --repo ${CLONE_URL} 2>/dev/null || true
         fi
     
-    # Check Verbose Build Label
-    - name: Check verbose build label
+    # Check PR Labels
+    - name: Check PR labels
       shell: bash
-      id: verbose-check
+      id: label-check
       if: github.event_name == 'pull_request'
       env:
         GH_TOKEN: ${{ inputs.GH_TOKEN || github.token }}
         CLONE_URL: ${{ github.event.pull_request.head.repo.clone_url }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
       run: |
-        VERBOSE=false
-        if gh pr view ${PR_NUMBER} --json labels --repo ${CLONE_URL} 2>/dev/null | \
-           jq -e '.labels[]? | select(.name == "verbose")' > /dev/null; then
-          echo "📢 Verbose build enabled by label"
-          VERBOSE=true
-        fi
-        echo "verbose_logging=${VERBOSE}" >> $GITHUB_OUTPUT
+        LABELS=$(gh pr view ${PR_NUMBER} --json labels --repo ${CLONE_URL} 2>/dev/null | \
+          jq -r '.labels[].name // empty')
+        
+        DEBUG=false
+        PROGRESS=false
+        for label in $LABELS; do
+          if [ "$label" = "debug" ]; then
+            echo "🐛 Debug mode enabled by label"
+            DEBUG=true
+          fi
+          if [ "$label" = "progress" ]; then
+            echo "📊 Download progress enabled by label"
+            PROGRESS=true
+          fi
+        done
+        echo "debug_logging=${DEBUG}" >> $GITHUB_OUTPUT
+        echo "show_progress=${PROGRESS}" >> $GITHUB_OUTPUT
     
     # Clean Maven Metadata
     - name: Clean Maven metadata
@@ -335,7 +345,8 @@ runs:
         FAIL_FAST: ${{ inputs.fail_fast }}
         MAVEN_PROFILES: ${{ inputs.maven_profiles }}
         MAVEN_ARGS: ${{ inputs.maven_args }}
-        VERBOSE_LOGGING: ${{ steps.verbose-check.outputs.verbose_logging }}
+        DEBUG_LOGGING: ${{ steps.label-check.outputs.debug_logging }}
+        SHOW_PROGRESS: ${{ steps.label-check.outputs.show_progress }}
       run: |
         # Build module arguments
         MODULE_ARGS=""
@@ -358,10 +369,15 @@ runs:
           FAIL_ARGS="--fail-fast"
         fi
         
-        # Build verbose arguments
-        VERBOSE_ARGS="--no-transfer-progress"
-        if [ "${VERBOSE_LOGGING}" = "true" ]; then
-          VERBOSE_ARGS="-X"
+        # Build label-based arguments
+        MAVEN_DEBUG=""
+        if [ "${DEBUG_LOGGING}" = "true" ]; then
+          MAVEN_DEBUG="-X"
+        fi
+        
+        TRANSFER_ARGS="--no-transfer-progress"
+        if [ "${SHOW_PROGRESS}" = "true" ]; then
+          TRANSFER_ARGS=""
         fi
         
         # Execute Maven
@@ -371,7 +387,8 @@ runs:
           -Dmaven.artifact.threads=20 \
           -Dgpg.skip=true \
           -U \
-          ${VERBOSE_ARGS} \
+          ${MAVEN_DEBUG} \
+          ${TRANSFER_ARGS} \
           ${FAIL_ARGS} \
           ${TEST_ARGS} \
           ${MODULE_ARGS} \
