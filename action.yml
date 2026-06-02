@@ -364,6 +364,12 @@ runs:
           echo "🔨 Full build mode"
         fi
         
+        # Suggest available PR labels
+        echo "💡 Tip: add labels to this PR to control the build:"
+        echo "   pr/debug     - Enable Maven debug mode (-X) for detailed logs"
+        echo "   pr/progress  - Show Maven download progress (hidden by default)"
+        echo "   pr/nocolors  - Disable ANSI colors in Maven output"
+        
         # Build test arguments
         TEST_ARGS=""
         if [ "${SKIP_TESTS}" = "true" ]; then
