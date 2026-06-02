@@ -318,8 +318,6 @@ runs:
         MAVEN_PROFILES: ${{ inputs.maven_profiles }}
         MAVEN_ARGS: ${{ inputs.maven_args }}
       run: |
-        echo "::group::Maven Build"
-        
         # Build module arguments
         MODULE_ARGS=""
         if [ -n "${PARTIAL_MODULES}" ]; then
@@ -342,36 +340,19 @@ runs:
         fi
         
         # Execute Maven
-        set -x
         mvn -B clean verify \
           -P${MAVEN_PROFILES} \
           -Dstyle.color=always \
           -Dmaven.artifact.threads=20 \
           -Dgpg.skip=true \
           -U \
+          --no-transfer-progress \
           ${FAIL_ARGS} \
           ${TEST_ARGS} \
           ${MODULE_ARGS} \
           ${MAVEN_ARGS}
-        
-        echo "::endgroup::"
     
-    # Build Summary
-    - name: Build summary
-      shell: bash
-      if: always()
-      env:
-        BUILD_TYPE: ${{ steps.build-info.outputs.build_type }}
-        MODULES_BUILT: ${{ steps.build-info.outputs.modules_built }}
-        BUILD_STATUS: ${{ steps.build-maven.outcome }}
-      run: |
-        echo "## 🏗️ Build Summary" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "- **Build Type:** ${BUILD_TYPE}" >> $GITHUB_STEP_SUMMARY
-        echo "- **Modules:** ${MODULES_BUILT}" >> $GITHUB_STEP_SUMMARY
-        echo "- **Status:** ${BUILD_STATUS}" >> $GITHUB_STEP_SUMMARY
-        echo "- **JDK:** ${{ inputs.jdk_major_version }} (${{ inputs.jdk_distribution }})" >> $GITHUB_STEP_SUMMARY
-        echo "- **Maven:** ${{ inputs.maven_version }}" >> $GITHUB_STEP_SUMMARY
+
 
 branding:
   icon: "package"
