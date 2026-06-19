@@ -18,7 +18,19 @@ inputs:
   extra_maven_opts:
     description: 'Additional Maven JVM options (MAVEN_OPTS)'
     required: false
-  
+  update_snapshots:
+    description: 'Force update of SNAPSHOT dependencies (-U)'
+    required: false
+    default: "true"
+  skip_gpg:
+    description: 'Skip GPG signing during the build (-Dgpg.skip=true)'
+    required: false
+    default: "true"
+  use_maven_wrapper:
+    description: 'Use the project Maven wrapper (./mvnw) instead of the installed Maven'
+    required: false
+    default: "false"
+
   # JDK Configuration
   jdk_major_version:
     description: 'JDK major version (8, 11, 17, 21, 25, etc.)'
@@ -28,7 +40,7 @@ inputs:
     description: 'OpenJDK distribution (temurin, zulu, adopt, liberica, etc.)'
     default: "zulu"
     required: false
-  
+
   # Build Configuration
   maximize_build_space:
     description: 'Maximize build space for larger projects'
@@ -39,10 +51,18 @@ inputs:
     required: false
     default: "false"
   fail_fast:
-    description: 'Fail the build at the first error'
+    description: 'Fail the build at the first error (use --fail-fast); otherwise continue with --fail-at-end'
     required: false
     default: "true"
-  
+  build_timeout_minutes:
+    description: 'Timeout in minutes for the Maven build step'
+    required: false
+    default: "60"
+  check_module_versions:
+    description: 'Fail the build if a submodule version does not match the parent pom version'
+    required: false
+    default: "true"
+
   # Partial Build Configuration
   enable_partial_build:
     description: 'Enable partial build feature'
@@ -51,7 +71,7 @@ inputs:
   partial_build_modules:
     description: 'Manually specify modules for partial build (comma-separated)'
     required: false
-  
+
   # Credentials
   NEXUS_USERNAME:
     description: 'Maven Nexus server username (read-only recommended)'
@@ -62,7 +82,7 @@ inputs:
   GH_TOKEN:
     description: 'GitHub token for private repositories'
     required: false
-  
+
   # Advanced Configuration
   M2_SETTINGS_FILE_URL:
     description: 'Maven settings.xml file download URL'
@@ -71,10 +91,6 @@ inputs:
     description: 'Show git checkout progress'
     default: "false"
     required: false
-  cache_key_suffix:
-    description: 'Suffix for cache key customization'
-    required: false
-    default: ""
 
 outputs:
   build_type:
@@ -99,35 +115,161 @@ runs:
         remove-android: 'true'
         remove-haskell: 'true'
         remove-codeql: 'true'
-    
+
     # Checkout Repository
     - name: Checkout repository
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
       with:
         fetch-depth: 0
         token: ${{ inputs.GH_TOKEN || github.token }}
         show-progress: ${{ inputs.GIT_CHECKOUT_SHOW_PROGRESS == 'true' }}
-    
+
+    # Check Submodule Version Consistency
+    - name: Check module version consistency
+      shell: bash
+      if: inputs.check_module_versions == 'true'
+      run: |
+        set -e
+        echo "::group::Checking module version consistency"
+        python3 - <<'PY'
+        import os
+        import sys
+        import glob
+        import xml.etree.ElementTree as ET
+
+        def strip_ns(tag):
+            return tag.split('}', 1)[1] if '}' in tag else tag
+
+        def find_elem(parent, name):
+            for child in parent:
+                if strip_ns(child.tag) == name:
+                    return child
+            return None
+
+        def get_text(parent, name):
+            el = find_elem(parent, name) if parent is not None else None
+            return el.text.strip() if el is not None and el.text else None
+
+        def parse_pom(path):
+            tree = ET.parse(path)
+            return tree.getroot()
+
+        root_path = "pom.xml"
+        if not os.path.exists(root_path):
+            print("ℹ️ No root pom.xml found - skipping version check")
+            sys.exit(0)
+
+        root = parse_pom(root_path)
+        root_gid = get_text(root, "groupId")
+        root_aid = get_text(root, "artifactId")
+        root_ver = get_text(root, "version")
+
+        if not root_ver:
+            print("ℹ️ Root pom.xml has no <version> - skipping version check")
+            sys.exit(0)
+
+        root_ga = f"{root_gid}:{root_aid}" if root_gid and root_aid else None
+        print(f"📋 Root module: {root_ga or root_aid} @ {root_ver}")
+
+        # Collect all pom.xml excluding the root and generated dirs
+        poms = []
+        for path in glob.iglob("**/pom.xml", recursive=True):
+            parts = path.split(os.sep)
+            if any(p in ("target", ".git", "node_modules") for p in parts):
+                continue
+            if os.path.abspath(path) == os.path.abspath(root_path):
+                continue
+            poms.append(path)
+
+        issues = []
+        checked = 0
+        for path in sorted(poms):
+            try:
+                pom = parse_pom(path)
+            except ET.ParseError as e:
+                issues.append(f"  ✗ {path}: invalid XML ({e})")
+                continue
+
+            own_ver = get_text(pom, "version")
+            parent = find_elem(pom, "parent")
+            parent_gid = get_text(parent, "groupId") if parent is not None else None
+            parent_aid = get_text(parent, "artifactId") if parent is not None else None
+            parent_ver = get_text(parent, "version") if parent is not None else None
+            parent_ga = f"{parent_gid}:{parent_aid}" if parent_gid and parent_aid else None
+
+            checked += 1
+            module_id = own_ver and f"{path} ({own_ver})" or path
+
+            # Effective version = own version if declared, else inherited from parent
+            effective_ver = own_ver or parent_ver
+            if effective_ver is None:
+                continue  # not a versioned module
+
+            # Check parent reference points to root and version matches
+            if parent_ga and parent_ga == root_ga and parent_ver and parent_ver != root_ver:
+                issues.append(
+                    f"  ✗ {path}: <parent><version> is {parent_ver} but root is {root_ver}"
+                )
+
+            # Check module's own version matches root (uniform versioning)
+            if own_ver and own_ver != root_ver:
+                issues.append(
+                    f"  ✗ {path}: <version> is {own_ver} but root is {root_ver}"
+                )
+
+            # If no own version but inherited parent version differs from root
+            if not own_ver and parent_ver and parent_ver != root_ver and parent_ga == root_ga:
+                # already reported above; avoid double counting
+                pass
+
+        print(f"🔍 Checked {checked} module(s)")
+        if issues:
+            print("")
+            print(f"❌ {len(issues)} version mismatch(es) found:")
+            for i in issues:
+                print(i)
+            print("")
+            print("Fix by aligning submodule versions with the root pom version.")
+            sys.exit(1)
+        else:
+            print(f"✅ All modules aligned with root version {root_ver}")
+        PY
+        echo "::endgroup::"
+
+    # Fetch PR Labels (once, reused by later steps)
+    - name: Fetch PR labels
+      shell: bash
+      id: fetch-labels
+      if: github.event_name == 'pull_request'
+      env:
+        GH_TOKEN: ${{ inputs.GH_TOKEN || github.token }}
+        CLONE_URL: ${{ github.event.pull_request.head.repo.clone_url }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+      run: |
+        LABELS=$(gh pr view ${PR_NUMBER} --json labels --repo ${CLONE_URL} 2>/dev/null | \
+          jq -r '.labels[].name // empty')
+        echo "labels<<EOF" >> $GITHUB_OUTPUT
+        echo "${LABELS}" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
     # Analyze PR for Partial Build
     - name: Analyze pull request changes
       shell: bash
       id: analyse-pr
       if: inputs.enable_partial_build == 'true' && github.event_name == 'pull_request'
       env:
-        GH_TOKEN: ${{ inputs.GH_TOKEN || github.token }}
         IS_FORK: ${{ github.event.pull_request.head.repo.fork }}
         BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
-        CLONE_URL: ${{ github.event.pull_request.head.repo.clone_url }}
-        PR_NUMBER: ${{ github.event.pull_request.number }}
         MANUAL_MODULES: ${{ inputs.partial_build_modules }}
+        PR_LABELS: ${{ steps.fetch-labels.outputs.labels }}
       run: |
         set -e
         echo "::group::Analyzing PR for partial build eligibility"
-        
+
         # Initialize output
         echo "partial_modules=" >> $GITHUB_OUTPUT
         echo "build_type=full" >> $GITHUB_OUTPUT
-        
+
         # Manual override
         if [ -n "${MANUAL_MODULES}" ]; then
           echo "✅ Manual modules specified: ${MANUAL_MODULES}"
@@ -136,122 +278,115 @@ runs:
           echo "::endgroup::"
           exit 0
         fi
-        
+
         # Check for fork
-        if [ "${IS_FORK}" = "true" ]; then 
+        if [ "${IS_FORK}" = "true" ]; then
           echo "⚠️ Forked repository detected - partial build disabled"
           echo "::endgroup::"
           exit 0
         fi
-        
+
         # Check for patch branch
-        if [[ "${BASE_BRANCH}" =~ ^patch/ ]]; then 
+        if [[ "${BASE_BRANCH}" =~ ^patch/ ]]; then
           echo "⚠️ Patch branch detected - full build required"
           echo "::endgroup::"
           exit 0
         fi
-        
+
         # Check if branch is up-to-date
         BASE_SHA=$(git rev-parse origin/${BASE_BRANCH})
         MERGE_BASE_SHA=$(git merge-base origin/${BASE_BRANCH} HEAD)
-        if [ "${BASE_SHA}" != "${MERGE_BASE_SHA}" ]; then 
+        if [ "${BASE_SHA}" != "${MERGE_BASE_SHA}" ]; then
           echo "⚠️ Branch is diverged - please update (full build)"
           echo "::endgroup::"
           exit 0
         fi
-        
-        # Check for fullCIBuild label
-        if gh pr view ${PR_NUMBER} --json labels --repo ${CLONE_URL} 2>/dev/null | \
-           jq -e '.labels[]? | select(.name == "fullCIBuild")' > /dev/null; then
+
+        # Check for fullCIBuild label (from cached labels)
+        if echo "${PR_LABELS}" | grep -qx 'fullCIBuild'; then
           echo "🏷️ fullCIBuild label detected - full build enforced"
           echo "::endgroup::"
           exit 0
         fi
-        
+
         # Discover frontend modules (WAR packaging)
         echo "🔍 Discovering frontend modules..."
-        FRONTEND_MODULES=$(find . -name pom.xml -type f | while read pomfile; do 
-          if grep -qi '<packaging>war</packaging>' "$pomfile"; then 
+        FRONTEND_MODULES=$(find . -name pom.xml -type f \
+          -not -path '*/target/*' \
+          -not -path '*/.git/*' \
+          -not -path '*/node_modules/*' | while read pomfile; do
+          if grep -qi '<packaging>war</packaging>' "$pomfile"; then
             dirname "$pomfile" | sed -E 's|^\./||g'
           fi
         done | sort -u | xargs)
-        
-        if [ -z "${FRONTEND_MODULES}" ]; then 
+
+        if [ -z "${FRONTEND_MODULES}" ]; then
           echo "ℹ️ No frontend modules detected - full build"
           echo "::endgroup::"
           exit 0
         fi
-        
+
         echo "📦 Frontend modules: ${FRONTEND_MODULES}"
-        
+
         # Get changed files
         echo "📝 Changed files:"
         CHANGED_FILES=$(git diff --name-only origin/${BASE_BRANCH} HEAD | \
                         grep -Pv '^\.github' || true)
         echo "${CHANGED_FILES}"
-        
+
         if [ -z "${CHANGED_FILES}" ]; then
           echo "ℹ️ No relevant files changed - full build"
           echo "::endgroup::"
           exit 0
         fi
-        
+
         # Determine modules to build
         MODULES_TO_BUILD=""
         while IFS= read -r file; do
           [ -z "$file" ] && continue
           FOUND=false
-          for module in $FRONTEND_MODULES; do 
+          for module in $FRONTEND_MODULES; do
             if [[ "$file" == "$module"/* ]]; then
               MODULES_TO_BUILD="${MODULES_TO_BUILD} ${module}"
               FOUND=true
               break
             fi
           done
-          if [ "$FOUND" = false ]; then 
+          if [ "$FOUND" = false ]; then
             echo "⚠️ File '$file' outside frontend modules - full build"
             echo "::endgroup::"
             exit 0
-          fi   
+          fi
         done <<< "${CHANGED_FILES}"
-        
+
         # Remove duplicates and format
         MODULES_TO_BUILD=$(echo "${MODULES_TO_BUILD}" | tr ', ' '\n' | grep -v '^$' | awk '!seen[$0]++' | paste -sd ',' -)
-        if [ -z "${MODULES_TO_BUILD}" ]; then 
+        if [ -z "${MODULES_TO_BUILD}" ]; then
           echo "ℹ️ No modules to build - full build"
           echo "::endgroup::"
           exit 0
         fi
-        
+
         echo "✅ Partial build eligible"
         echo "📦 Modules to build: ${MODULES_TO_BUILD}"
         echo "partial_modules=${MODULES_TO_BUILD}" >> $GITHUB_OUTPUT
         echo "build_type=partial" >> $GITHUB_OUTPUT
         echo "::endgroup::"
-    
-    # Setup JDK
+
+    # Setup JDK (with built-in Maven cache)
     - name: Set up JDK ${{ inputs.jdk_major_version }}
       uses: actions/setup-java@v5
       with:
         java-version: ${{ inputs.jdk_major_version }}
         distribution: ${{ inputs.jdk_distribution }}
-    
+        cache: maven
+
     # Setup Maven
     - name: Set up Maven ${{ inputs.maven_version }}
       uses: stCarolas/setup-maven@v5.1
       with:
         maven-version: ${{ inputs.maven_version }}
-    
-    # Cache Maven Dependencies
-    - name: Cache Maven dependencies
-      uses: actions/cache@v5
-      with:
-        path: ~/.m2/repository
-        key: ${{ runner.os }}-maven-${{ inputs.jdk_major_version }}-${{ hashFiles('**/pom.xml') }}${{ inputs.cache_key_suffix }}
-        restore-keys: |
-          ${{ runner.os }}-maven-${{ inputs.jdk_major_version }}-
-          ${{ runner.os }}-maven-
-    
+
     # Download Maven Settings
     - name: Configure Maven settings
       shell: bash
@@ -262,7 +397,7 @@ runs:
         wget -q "${{ inputs.M2_SETTINGS_FILE_URL }}" -O ~/.m2/settings.xml
         echo "✅ Maven settings configured"
         echo "::endgroup::"
-    
+
     # Update PR Labels
     - name: Update PR labels
       shell: bash
@@ -274,28 +409,23 @@ runs:
         BUILD_TYPE: ${{ steps.analyse-pr.outputs.build_type }}
       run: |
         if [ "${BUILD_TYPE}" = "partial" ]; then
-          gh pr edit ${PR_NUMBER} --add-label partialCIBuild --repo ${CLONE_URL} 2>/dev/null || true 
-        else 
+          gh pr edit ${PR_NUMBER} --add-label partialCIBuild --repo ${CLONE_URL} 2>/dev/null || true
+        else
           gh pr edit ${PR_NUMBER} --remove-label partialCIBuild --repo ${CLONE_URL} 2>/dev/null || true
         fi
-    
-    # Check PR Labels
-    - name: Check PR labels
+
+    # Resolve Build Options from PR Labels (from cached labels, no API call)
+    - name: Resolve PR label options
       shell: bash
       id: label-check
       if: github.event_name == 'pull_request'
       env:
-        GH_TOKEN: ${{ inputs.GH_TOKEN || github.token }}
-        CLONE_URL: ${{ github.event.pull_request.head.repo.clone_url }}
-        PR_NUMBER: ${{ github.event.pull_request.number }}
+        PR_LABELS: ${{ steps.fetch-labels.outputs.labels }}
       run: |
-        LABELS=$(gh pr view ${PR_NUMBER} --json labels --repo ${CLONE_URL} 2>/dev/null | \
-          jq -r '.labels[].name // empty')
-        
         DEBUG=false
         PROGRESS=false
         NOCOLORS=false
-        for label in $LABELS; do
+        for label in ${PR_LABELS}; do
           if [ "$label" = "pr/debug" ]; then
             echo "🐛 Debug mode enabled by label"
             DEBUG=true
@@ -312,7 +442,7 @@ runs:
         echo "debug_logging=${DEBUG}" >> $GITHUB_OUTPUT
         echo "show_progress=${PROGRESS}" >> $GITHUB_OUTPUT
         echo "nocolors=${NOCOLORS}" >> $GITHUB_OUTPUT
-    
+
     # Clean Maven Metadata
     - name: Clean Maven metadata
       shell: bash
@@ -321,7 +451,7 @@ runs:
           find ~/.m2/repository -name "_remote.repositories" -type f -delete
           find ~/.m2/repository -name "*.lastUpdated" -type f -delete
         fi
-    
+
     # Set Build Info
     - name: Set build information
       shell: bash
@@ -337,7 +467,7 @@ runs:
           echo "build_type=full" >> $GITHUB_OUTPUT
           echo "modules_built=all" >> $GITHUB_OUTPUT
         fi
-    
+
     # Execute Maven Build
     - name: Build with Maven
       shell: bash
@@ -354,64 +484,97 @@ runs:
         DEBUG_LOGGING: ${{ steps.label-check.outputs.debug_logging }}
         SHOW_PROGRESS: ${{ steps.label-check.outputs.show_progress }}
         NOCOLORS: ${{ steps.label-check.outputs.nocolors }}
+        UPDATE_SNAPSHOTS: ${{ inputs.update_snapshots }}
+        SKIP_GPG: ${{ inputs.skip_gpg }}
+        USE_MAVEN_WRAPPER: ${{ inputs.use_maven_wrapper }}
+        BUILD_TIMEOUT_MINUTES: ${{ inputs.build_timeout_minutes }}
       run: |
-        # Build module arguments
+        # Determine Maven command (wrapper or installed)
+        MVN_CMD="mvn"
+        if [ "${USE_MAVEN_WRAPPER}" = "true" ]; then
+          if [ -f "./mvnw" ]; then
+            chmod +x ./mvnw
+            MVN_CMD="./mvnw"
+            echo "🧱 Using Maven wrapper"
+          else
+            echo "⚠️ use_maven_wrapper=true but ./mvnw not found - falling back to mvn"
+          fi
+        fi
+
+        # Build module arguments (-am also builds upstream dependencies)
         MODULE_ARGS=""
         if [ -n "${PARTIAL_MODULES}" ]; then
           echo "🎯 Partial build mode"
-          MODULE_ARGS="-pl $(echo ${PARTIAL_MODULES} | sed 's/,/ -pl /g')"
+          MODULE_ARGS="-pl ${PARTIAL_MODULES} -am"
         else
           echo "🔨 Full build mode"
         fi
-        
+
         # Suggest available PR labels
         echo "💡 Tip: add labels to this PR to control the build:"
         echo "   pr/debug     - Enable Maven debug mode (-X) for detailed logs"
         echo "   pr/progress  - Show Maven download progress (hidden by default)"
         echo "   pr/nocolors  - Disable ANSI colors in Maven output"
-        
+
         # Build test arguments
         TEST_ARGS=""
         if [ "${SKIP_TESTS}" = "true" ]; then
           TEST_ARGS="-DskipTests"
         fi
-        
-        # Build fail-fast arguments
-        FAIL_ARGS=""
+
+        # Build fail-fast arguments (--fail-fast is Maven default; --fail-at-end continues)
+        FAIL_ARGS="--fail-at-end"
         if [ "${FAIL_FAST}" = "true" ]; then
           FAIL_ARGS="--fail-fast"
         fi
-        
+
         # Build label-based arguments
         MAVEN_DEBUG=""
         if [ "${DEBUG_LOGGING}" = "true" ]; then
           MAVEN_DEBUG="-X"
         fi
-        
+
         TRANSFER_ARGS="--no-transfer-progress"
         if [ "${SHOW_PROGRESS}" = "true" ]; then
           TRANSFER_ARGS=""
         fi
-        
+
         COLOR_ARGS="-Dstyle.color=always"
         if [ "${NOCOLORS}" = "true" ]; then
           COLOR_ARGS="-Dstyle.color=never"
         fi
-        
-        # Execute Maven
-        mvn -B clean verify \
+
+        # Build snapshot update arguments
+        UPDATE_ARGS="-U"
+        if [ "${UPDATE_SNAPSHOTS}" = "false" ]; then
+          UPDATE_ARGS=""
+        fi
+
+        # Build GPG skip argument
+        GPG_ARGS="-Dgpg.skip=true"
+        if [ "${SKIP_GPG}" = "false" ]; then
+          GPG_ARGS=""
+        fi
+
+        # Execute Maven (enforced via the `timeout` command; composite steps don't support timeout-minutes)
+        # GNU timeout exits 124 on timeout, 137 on KILL. We surface a clear message in those cases.
+        timeout "${BUILD_TIMEOUT_MINUTES}m" ${MVN_CMD} -B clean verify \
           -P${MAVEN_PROFILES} \
           ${COLOR_ARGS} \
           -Dmaven.artifact.threads=20 \
-          -Dgpg.skip=true \
-          -U \
+          ${GPG_ARGS} \
+          ${UPDATE_ARGS} \
           ${MAVEN_DEBUG} \
           ${TRANSFER_ARGS} \
           ${FAIL_ARGS} \
           ${TEST_ARGS} \
           ${MODULE_ARGS} \
           ${MAVEN_ARGS}
-    
+        MVN_EXIT=$?
+        if [ "${MVN_EXIT}" = "124" ] || [ "${MVN_EXIT}" = "137" ]; then
+          echo "❌ Maven build timed out after ${BUILD_TIMEOUT_MINUTES} minutes"
+        fi
+        exit ${MVN_EXIT}
 
 
 branding:
